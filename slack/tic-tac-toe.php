@@ -18,14 +18,15 @@ $help_message = 'To start a game of tic-tac-toe, challenge another player using 
 During a game, the player taking the turn can enter `/tic-tac-toe [a number between 1 to 9]` to make a move.
 Reset the game with `/tic-tac-toe reset`';
 
-function fetch_user($mysql, $team_id, $username) {
+function fetch_user($team_id, $query, $key = 'name') {
+	global $mysql;
 	$token = get_team_token($mysql, $team_id);
 	$response = (new GuzzleHttp\Client(['base_uri' => 'https://slack.com/api/']))->request('GET', 'users.list', [
 		'query' => ['token' => $token],
 	]);
 	$data = json_decode($response->getBody());
 	foreach($data->{'members'} as $member) {
-		if($member->{'name'} == $username) {
+		if($member->{$key} == $query) {
 			return $member;
 		}
 	}
@@ -33,7 +34,9 @@ function fetch_user($mysql, $team_id, $username) {
 }
 
 function format_board($game) {
-	$str = "Current board:\n```";
+	global $mysql, $team_id;
+	$user = fetch_user($team_id, $game['turn'] ? $game['player_1_id'] : $game['player_2_id'], 'id');
+	$str = $user->{'name'} . "'s move:\n```";
 	for($x = 0; $x < 3; $x++) {
 		for($y = 0; $y < 3; $y++) {
 			$i = 3 * $x + $y;
@@ -51,14 +54,10 @@ function format_board($game) {
 	return $str . '```';
 }
 
-function make_move($mysql, &$game, $player, $move, &$response) {
-	if($player == 0) {
-		$symbol = 'X';
-	} else {
-		$symbol = 'O';
-	}
+function make_move(&$game, $player, $move, &$response) {
+	global $mysql;
 	if($game['game'][$move] == '-') {
-		$game['game'][$move] = $symbol;
+		$game['game'][$move] = $player == 0 ? 'X' : 'O';
 		$game['turn'] = 1 - $player;
 		$response['response_type'] = 'in_channel';
 		$response['text'] = format_board($game);
@@ -92,7 +91,7 @@ function check_win_condition($board) {
 }
 
 function check_tie_condition($board) {
-	for($i = 0; $i < sizeof($board); $i++) {
+	for($i = 0; $i < 9; $i++) {
 		if($board[$i] == '-') {
 			return FALSE;
 		}
@@ -103,14 +102,15 @@ function check_tie_condition($board) {
 if($text[0] == 'help') {
 	// help command
 	$response['text'] = $help_message;
-} else if($text[0] == 'challenge' and sizeof($text) == 2) {
+}
+else if($text[0] == 'challenge' and sizeof($text) == 2) {
 	// start game command
 	if(is_null(get_game($mysql, $channel_id))) {
 		$opponent_name = $text[1];
 		if($opponent_name[0] == '@') {
 			$opponent_name = substr($opponent_name, 1);
 		}
-		$opponent = fetch_user($mysql, $team_id, $opponent_name);
+		$opponent = fetch_user($team_id, $opponent_name);
 		if(is_null($opponent)) {
 			$response['text'] = $opponent_name.' doesn\'t appear to be a user in team channel.';
 		} else {
@@ -123,10 +123,12 @@ if($text[0] == 'help') {
 		// if game is in progress, print message
 		$response['text'] = 'There is currently an ongoing game in this channel.';
 	}
-} else if($text[0] == 'reset') {
+}
+else if($text[0] == 'reset') {
 	complete_game($mysql, $channel_id);
 	$response['text'] = 'Game reset.';
-} else if(preg_match('/^[1-9]$/', $text[0]) === 1) {
+}
+else if(preg_match('/^[1-9]$/', $text[0]) === 1) {
 	// make move command
 	$move = (int)$text[0] - 1;
 	$game = get_game($mysql, $channel_id);
@@ -135,7 +137,7 @@ if($text[0] == 'help') {
 	} else {
 		if(($game['turn'] == 0 and $user_id == $game['player_1_id']) or ($game['turn'] == 1 and $user_id == $game['player_2_id'])) {
 			// if it's the user's turn
-			if(make_move($mysql, $game, $game['turn'], $move, $response)) {
+			if(make_move($game, $game['turn'], $move, $response)) {
 				if(check_win_condition($game['game'])) {
 					$response['text'] .= "\n".$user_name." is the winner!";
 					complete_game($mysql, $channel_id);
@@ -152,7 +154,8 @@ if($text[0] == 'help') {
 			$response['text'] = 'You are not a player in this game. Wait current game to be finish or try again in another channel.';
 		}
 	}
-} else {
+}
+else {
 	// default command
 	$game = get_game($mysql, $channel_id);
 	if(is_null($game)) {
