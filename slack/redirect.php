@@ -1,27 +1,24 @@
 <?php
 require '../vendor/autoload.php';
+require '../database.php';
 $config = parse_ini_file('../config.ini');
 
-use GuzzleHttp\Client;
-
-$client = new Client(['base_uri' => 'https://slack.com/api/']);
-
-$response = $client->request('GET', 'oauth.access', [
+$response = (new GuzzleHttp\Client(['base_uri' => 'https://slack.com/api/']))->request('GET', 'oauth.access', [
 	'query' => ['client_id' => $config['client_id'], 'client_secret' => $config['client_secret'], 'code' => $_GET['code']],
 ]);
-
-
 $data = json_decode($response->getBody());
 
-print($response->getBody());
-
 if($data->{'ok'}) {
-	print($data->{'access_token'});
-	print($data->{'user_id'});
-	print($data->{'team_name'});
-	print($data->{'team_id'});
+	// add token to database
+	if(!$update_team_token(get_database(), $data->{'team_id'}, $data->{'access_token'})) {
+		echo 'Failed to add team. Please try again later.';
+	} else {
+		echo 'Added to team '.$data->{'team_name'}.'.';
+	}
+	$stmt->close();
 } else {
-	print($data->{'error'});
+	// redirect to add page to retry
+	header("Location: /add.php", TRUE, 302);
 }
 
 ?>
